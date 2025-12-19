@@ -5,101 +5,124 @@ from astropy.visualization import simple_norm
 import matplotlib.pyplot as plt
 from tabulate import tabulate
 
-# ANSI colors for cool alternating rows and bold text
+# ANSI color codes for cool alternating rows
 CYAN = "\033[96m"
 BLUE = "\033[94m"
 RESET = "\033[0m"
 BOLD = "\033[1m"
-GREEN = "\033[92m"
-YELLOW = "\033[93m"
 
-def print_colored_table(table, file_base, table_index):
-    """Pretty print table with alternating cyan/blue rows."""
+# List of nice colormaps for astronomy images (standard + reversed)
+cmaps = ['viridis', 'plasma', 'inferno', 'magma', 'cividis', 
+         'hot', 'afmhot', 'gray', 'gist_gray',
+         'viridis_r', 'plasma_r', 'inferno_r', 'magma_r', 'cividis_r']
+
+def print_colored_table(table, table_index):
+    """Print a nicely formatted table with alternating cool colors."""
     rows = table.as_array().tolist()
     headers = table.colnames
     
     colored_headers = [f"{BOLD}{CYAN}{h}{RESET}" for h in headers]
+    
     colored_rows = []
     for i, row in enumerate(rows):
         color = CYAN if i % 2 == 0 else BLUE
         colored_row = [f"{color}{str(cell)}{RESET}" for cell in row]
         colored_rows.append(colored_row)
     
-    print(f"\n{BOLD}{GREEN}Table {table_index} (from {file_base}.fits){RESET}")
+    print(f"\n{BOLD}Table {table_index}:{RESET}")
     print(tabulate(colored_rows, headers=colored_headers, tablefmt="grid"))
 
-def save_image_preview(data, file_base, ext_index, ext_name):
-    """Save a quick PNG preview of image data."""
-    norm = simple_norm(data, 'sqrt', percent=99.5)  # Good stretch for astronomy images
-    plt.figure(figsize=(8, 8))
-    plt.imshow(data, cmap='gray', norm=norm, origin='lower')
-    plt.title(f"Preview: {file_base}.fits [{ext_index}:{ext_name}]")
-    plt.colorbar(label='Counts')
-    plt.axis('off')
-    
-    png_name = f"{file_base}_ext{ext_index}_{ext_name}.png"
-    plt.savefig(png_name, bbox_inches='tight', dpi=150)
-    plt.close()
-    print(f"{YELLOW}   → Saved preview: {png_name}{RESET}")
+# --- Set your single FITS file here ---
+fits_filename = "MAST_2025-12-18T13_08_21.848Z/HST/o5i301020_asn.fits"  # Change if needed
 
-# ------------------- CONFIGURATION -------------------
-# Main directory containing your downloaded MAST data
-base_dir = "MAST_2025-12-18T13_08_21.848Z/HST"
-
-# Set to True if you have nested subfolders and want to process everything recursively
-recursive = False  
-# ----------------------------------------------------
-
-print(f"{BOLD}Processing FITS files in: {base_dir}{RESET}\n")
-
-if recursive:
-    fits_files = []
-    for root, dirs, files in os.walk(base_dir):
-        for f in files:
-            if f.endswith('.fits'):
-                fits_files.append(os.path.join(root, f))
-else:
-    fits_files = [os.path.join(base_dir, f) for f in os.listdir(base_dir) if f.endswith('.fits')]
-
-fits_files.sort()  # Nice alphabetical order
-
-print(f"Found {len(fits_files)} FITS file(s):\n" + "\n".join([f"  • {os.path.basename(f)}" for f in fits_files]))
-print("\n" + "="*100 + "\n")
-
-for fits_path in fits_files:
-    file_base = os.path.splitext(os.path.basename(fits_path))[0]
-    print(f"{BOLD}{GREEN}Processing: {os.path.basename(fits_path)}{RESET}")
-    
-    try:
-        with fits.open(fits_path) as hdul:
-            print(f"{BOLD}FITS structure:{RESET}")
-            hdul.info()
-            print()
+try:
+    with fits.open(fits_filename) as hdul:
+        print(f"{BOLD}FITS file structure for {os.path.basename(fits_filename)}:{RESET}")
+        hdul.info()
+        print("\n" + "="*100 + "\n")
+        
+        table_count = 0
+        image_count = 0
+        
+        for i, hdu in enumerate(hdul):
+            print(f"{BOLD}Processing HDU {i} - {hdu.name} (type: {type(hdu).__name__}){RESET}")
             
-            table_count = 0
-            for i, hdu in enumerate(hdul):
-                # ----- Image data (PrimaryHDU or ImageHDU with 2D+ data) -----
-                if hasattr(hdu, 'data') and hdu.data is not None and hdu.data.ndim >= 2:
-                    print(f"{YELLOW}   Image extension {i}: {hdu.name} - shape {hdu.data.shape} - dtype {hdu.data.dtype}{RESET}")
-                    print(f"      Stats: min={hdu.data.min():.2f}, max={hdu.data.max():.2f}, mean={hdu.data.mean():.2f}")
-                    save_image_preview(hdu.data if hdu.data.ndim == 2 else hdu.data[0], file_base, i, hdu.name or f"IMG{i}")
+            if hdu.data is None:
+                print("  → No data array (likely Primary Header only)\n")
+                continue
+            
+            # Shape and dtype info
+            print(f"  Data shape: {hdu.data.shape}")
+            print(f"  Data dtype: {hdu.data.dtype}\n")
+            
+            # ----------- If it's a TABLE (BinTableHDU or TableHDU) -----------
+            if isinstance(hdu, (fits.BinTableHDU, fits.TableHDU)):
+                table_count += 1
+                t = Table(hdu.data)
                 
-                # ----- Table data (BinTableHDU or TableHDU) -----
-                elif isinstance(hdu, (fits.BinTableHDU, fits.TableHDU)) and hdu.data is not None:
-                    table_count += 1
-                    t = Table(hdu.data)
-                    print_colored_table(t, file_base, table_count)
-                    
-                    # Export to CSV
-                    csv_name = f"{file_base}_table_{table_count}.csv"
-                    t.write(csv_name, format='csv', overwrite=True)
-                    print(f"{YELLOW}   → Exported table to {csv_name}{RESET}")
+                # Pretty print in terminal
+                print_colored_table(t, table_count)
+                
+                # Export to CSV
+                base_name = os.path.splitext(fits_filename)[0]
+                csv_name = f"{base_name}_table_{table_count}.csv"
+                t.write(csv_name, format="csv", overwrite=True)
+                print(f"  → Exported table to {csv_name}\n")
             
-            if table_count == 0:
-                print("   No table extensions found in this file.")
-            print("\n" + "-"*80 + "\n")
+            # ----------- If it's IMAGE data (2D or more) -----------
+            elif len(hdu.data.shape) >= 2:
+                image_count += 1
+                base_name = os.path.splitext(os.path.basename(fits_filename))[0]
+                
+                # Flatten to 2D if needed (e.g., for simple cubes)
+                data2d = hdu.data
+                if len(data2d.shape) > 2:
+                    print(f"  → Multi-dimensional data ({data2d.shape}). Showing first slice.")
+                    data2d = data2d[0]  # Take first plane
+                
+                # Use astropy normalization for better contrast
+                norm = simple_norm(data2d, 'sqrt', percent=99.5)  # Good for astro images
+                
+                # Plot with several colormaps
+                n_cmaps = len(cmaps)
+                cols = 3
+                rows = (n_cmaps + cols - 1) // cols
+                fig, axes = plt.subplots(rows, cols, figsize=(4*cols, 3.5*rows))
+                fig.suptitle(f"HDU {i} - {hdu.name} from {os.path.basename(fits_filename)}", fontsize=16, fontweight='bold')
+                
+                if rows == 1:
+                    axes = axes.reshape(1, -1)
+                
+                for ax, cmap in zip(axes.flat, cmaps):
+                    ax.imshow(data2d, cmap=cmap, norm=norm, origin='lower')
+                    ax.set_title(cmap, fontsize=12)
+                    ax.axis('off')
+                
+                # Hide empty subplots
+                for ax in axes.flat[n_cmaps:]:
+                    ax.axis('off')
+                
+                plt.tight_layout()
+                plt.show()
+                
+                # Optionally save one (e.g., viridis) as PNG
+                save_fig, save_ax = plt.subplots(figsize=(8, 7))
+                save_ax.imshow(data2d, cmap='viridis', norm=norm, origin='lower')
+                save_ax.set_title(f"{base_name} - HDU {i} ({hdu.name}) - viridis")
+                save_ax.axis('off')
+                png_name = f"{base_name}_hdu{i}_image.png"
+                save_fig.savefig(png_name, bbox_inches='tight', dpi=150)
+                plt.close(save_fig)
+                print(f"  → Saved example image as {png_name}\n")
             
-    except Exception as e:
-        print(f"{BOLD}Error processing {fits_path}: {e}{RESET}\n")
+            else:
+                print("  → Data has unusual dimensions (not table or image) - skipping visualization\n")
+        
+        print(f"{BOLD}Summary:{RESET}")
+        print(f"  Tables found: {table_count} (printed + exported to CSV)")
+        print(f"  Images visualized: {image_count} (multiple colormaps each + one PNG saved)")
 
-print(f"{BOLD}{GREEN}All done! Check your folder for CSVs and PNG previews. 🫨{RESET}")
+except Exception as e:
+    print(f"Error: {e}")
+    import traceback
+    traceback.print_exc()
