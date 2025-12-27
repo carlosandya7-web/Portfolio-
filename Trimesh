@@ -1,0 +1,77 @@
+import numpy as np
+import trimesh
+from trimesh.path.entities import Line
+
+# Cube vertices and faces (same as before)
+vertices = np.array([
+    [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],
+    [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]
+])
+
+faces = np.array([
+    [0, 1, 2], [0, 2, 3],  # bottom
+    [4, 5, 6], [4, 6, 7],  # top
+    [0, 1, 5], [0, 5, 4],  # front
+    [1, 2, 6], [1, 6, 5],  # right
+    [2, 3, 7], [2, 7, 6],  # back
+    [3, 0, 4], [3, 4, 7]   # left
+])
+
+mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+
+# Per-face colors (you decide each one)
+face_colors = np.array([
+    [255, 0,   0,   255], [255, 0,   0,   255],  # bottom: red
+    [0,   255, 0,   255], [0,   255, 0,   255],  # top: green
+    [0,   0,   255, 255], [0,   0,   255, 255],  # front: blue
+    [255, 255, 0,   255], [255, 255, 0,   255],  # right: yellow
+    [255, 0,   255, 255], [255, 0,   255, 255],  # back: magenta
+    [0,   255, 255, 255], [0,   255, 255, 255]   # left: cyan
+], dtype=np.uint8)
+
+mesh.visual.face_colors = face_colors
+
+# Optional: semi-transparent faces for better edge visibility
+# mesh.visual.face_colors[:, 3] = 200
+
+# === PER-EDGE COLORS ===
+edges = mesh.edges_unique  # (n_edges, 2) vertex indices
+
+# Create one Line entity per edge (each with points [0, 1] → start/end of that edge)
+entities = []
+path_vertices = []  # All line vertices in order
+offset = 0
+for i in range(len(edges)):
+    entities.append(Line(points=[0, 1]))  # Local points: 0=start, 1=end
+    v1, v2 = edges[i]
+    path_vertices.append(mesh.vertices[v1])
+    path_vertices.append(mesh.vertices[v2])
+    offset += 2
+
+path_vertices = np.array(path_vertices)
+
+# Per-edge colors (one per entity → matches number of edges)
+edge_colors = np.zeros((len(edges), 4), dtype=np.uint8)
+edge_colors[:, 3] = 255  # opaque
+
+# Example: color based on height (same logic as before)
+for i, (v1, v2) in enumerate(edges):
+    z1 = mesh.vertices[v1, 2]
+    z2 = mesh.vertices[v2, 2]
+    if z1 == z2 == 0:      # bottom
+        edge_colors[i] = [255, 0, 0, 255]
+    elif z1 == z2 == 1:    # top
+        edge_colors[i] = [0, 255, 0, 255]
+    else:                  # vertical
+        edge_colors[i] = [255, 255, 255, 255]
+
+# Create the Path3D with per-entity colors
+wireframe = trimesh.path.Path3D(
+    entities=entities,
+    vertices=path_vertices,
+    colors=edge_colors  # Now per-entity (one color per edge/line)
+)
+
+# Show the scene
+scene = trimesh.Scene([mesh, wireframe])
+scene.show()
